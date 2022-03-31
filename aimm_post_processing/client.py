@@ -22,6 +22,7 @@ class RawMongo:
 ##################
 
 
+# TODO: figure out a better way to document the return values for this function
 def search_sets_in_child(
     root, child_names, search_symbol=None, search_edge=None
 ):
@@ -59,12 +60,13 @@ def search_sets_in_child(
         child = tuple(child_names)
     child_node = root[child]
 
-    if not search_symbol and not search_edge:
+    if search_symbol is None and search_edge is None:
         return child_node
-    if search_symbol:
+
+    if search_symbol is not None:
         child_node = child_node.search(symbol(search_symbol))
 
-    if search_edge:
+    if search_edge is not None:
         child_node = child_node.search(edge(search_edge))
 
     return child_node
