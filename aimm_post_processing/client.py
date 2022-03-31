@@ -24,26 +24,37 @@ class RawMongo:
 ##################
 
 
-def search_sets_in_child(root, child_names, search_symbol=None, search_edge=None):
-    """Walk down a branch of nodes to get a specified child node and use a search criteria
+def search_sets_in_child(
+    root, child_names, search_symbol=None, search_edge=None
+):
+    """Walks down a branch of nodes to get a specified child node and use a
+    search criteria.
 
-    :param parent_node: the parent node that the client will use to start going down using
+    Parameters
+    ----------
+    root : tiled.client.node.Node
+        The parent node that the client will use to start going down using
         the specified branch in child_names.
-    :type parent_node: tiled.client.node.Node
-    :param node_name_list: list of subsequent child nodes. They must be sorted in the same way
-        they were created in the tree
-    :type node_name: list
-    :param search_symbol: search criteria for element symbol
-    :type node_name: str
-    param search_symbol: search criteria for element edge
-    :type node_name: str
-    :return: the child node that was found in parent_node once the list of node names has
-        been used completely.
-    :rtype: a structure representing an element in the tree. If the element is the
-        parent node or a node in the middle of the tree, it returns tiled.client.node.Node.
-        If it reaches the last node of a branch, it returns a clietn structure that
-        represents the type of data strcuture that it contains;
-        e.g. tiled.client.dataframe.DataFrameClient, tiled.client.array.ArrayClient
+    child_names : list of tiled.client.node.Node
+        List of subsequent child nodes. They must be sorted in the same way
+        they were created in the tree.
+    search_symbol : str, optional
+        Search criteria for the element symbol (aka the element, e.g. "Cu").
+        Default is None.
+    search_edge : str, optional
+        Search criteria for the spectroscopy edge (e.g. the K-edge, "K", or the
+        L3 edge "L3"). Default is None.
+
+    Returns
+    -------
+    tiled.client.node.Node
+        A structure representing an element in the tree. If the element is the
+        parent node or a node in the middle of the tree, it returns
+        tiled.client.node.Node. If it reaches the last node of a branch,
+        it returns a client structure that represents the type of data
+        structure that it contains; e.g.
+        tiled.client.dataframe.DataFrameClient or
+        tiled.client.array.ArrayClient.
     """
 
     if isinstance(child_names, list):
@@ -94,7 +105,9 @@ if __name__ == "__main__":
     # Example Code
     client = from_uri("https://aimm.lbl.gov/api")
     child = ["NCM", "BM_NCMA"]
-    result_nodes = search_sets_in_child(client, child, search_symbol="Ni", search_edge="L3")
+    result_nodes = search_sets_in_child(
+        client, child, search_symbol="Ni", search_edge="L3"
+    )
 
     # TODO: Test multiple cases by passing a list with multiple paths.
     #       What is the best data structure to use as a container for the results?
