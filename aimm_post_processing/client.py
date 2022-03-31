@@ -9,9 +9,7 @@ import json
 @register(name="raw_mongo", overwrite=True)
 @dataclass
 class RawMongo:
-    """
-    Run a MongoDB query against a given collection.
-    """
+    """Run a MongoDB query against a given collection."""
 
     query: str  # We cannot put a dict in a URL, so this a JSON str.
 
@@ -73,31 +71,42 @@ def search_sets_in_child(
 
 
 def symbol(symbol):
-    """Wrapper method to generate a RawMongo query to search for an element symbol
+    """Wrapper method to generate a RawMongo query to search for an element
+    symbol
 
-    :param symbol: query parameter used to search for an element symbol.
-    :type symbol: str
-    :return: if a match was found, it returns a client node that includes all
-        the child nodes containing each individual dataset.
-    :rtype: tiled.client.node.Node
+    Parameters
+    ----------
+    symbol : str
+        Query parameter used to search for an element symbol.
+
+    Returns
+    -------
+    tiled.client.node.Node
+        If a match was found, it returns a client node that includes all the
+        child nodes containing each individual dataset.
     """
 
-    query = {"metadata.element.symbol": symbol}
-    return RawMongo(query)
+    return RawMongo({"metadata.element.symbol": symbol})
 
 
 def edge(edge):
-    """Wrapper methof to generate a RawMongo query to search for an element edge
+    """Wrapper method to generate a RawMongo query to search for an element
+    edge.
 
-    :param symbol: the parent node that the client will use to start going down using
-        the specified branch in child_names.
-    :type symbol: str
-    :return: if a match was found, it returns a client node that includes all
-        the child nodes containing each individual dataset.
-    :rtype: tiled.client.node.Node
+    Parameters
+    ----------
+    edge : str
+        The parent node that the client will use to start going down using the
+        specified branch in child_names.
+
+    Returns
+    -------
+    tiled.client.node.Node
+        If a match was found, it returns a client node that includes all the
+        child nodes containing each individual dataset.
     """
-    query = {"metadata.element.edge": edge}
-    return RawMongo(query)
+
+    return RawMongo({"metadata.element.edge": edge})
 
 
 if __name__ == "__main__":
