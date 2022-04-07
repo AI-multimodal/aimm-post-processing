@@ -57,8 +57,12 @@ def search_sets_in_child(
     """
 
     if isinstance(child_names, list):
-        child = tuple(child_names)
-    child_node = root[child]
+        child_names = tuple(child_names)
+    
+    # Search subsequent child nodes along the tree
+    child_node = root
+    for child in child_names:
+        child_node = child_node[child]
 
     if search_symbol is None and search_edge is None:
         return child_node
