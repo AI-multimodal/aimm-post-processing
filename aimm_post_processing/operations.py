@@ -1,6 +1,7 @@
-"""Module for housing postprocessing operations."""
+"""Module for housing post-processing operations."""
 
 from datetime import datetime
+from uuid import uuid4
 
 from monty.json import MSONable
 
@@ -19,7 +20,8 @@ class Operator(MSONable):
 
     def as_dict(self):
         d = super().as_dict()
-        d["datetime"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        dt = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        d["datetime"] = f"{dt} UTC"
         return d
 
     @classmethod
@@ -40,10 +42,16 @@ class Identity(Operator):
         Parameters
         ----------
         x : tiled.client.dataframe.DataFrameClient
+
+        Returns
+        -------
+        dict
+            A dictionary of the data and metadata.
         """
 
-        # Note this will throw a TypeError, as setting attributes is not
-        # allowed!
-        x.metadata["derived"] = {**self.as_dict(), "parents": [x.uri]}
+        data = x.read()
+        metadata = dict(x.metadata)
+        metadata["uid"] = str(uuid4())
+        metadata["post_processing"] = {**self.as_dict(), "parents": [x.uri]}
 
-        return x
+        return {"data": data, "metadata": metadata}
