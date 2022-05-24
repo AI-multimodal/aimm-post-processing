@@ -82,7 +82,23 @@ class TestOperator:
         assert isinstance(data, pd.core.frame.DataFrame)
         assert isinstance(metadata, dict)
 
+    def test_Smooth_works(self):
+        
+        smooth_operator = RemoveBackground()
+        data_dictionary = smooth_operator(
+            self.view, 
+            x0=15700, 
+            xf=15800, 
+            x_column="energy",
+            y_columns=["mutrans", "mufluor", "murefer"],
+            victoreen_order=0
+        )
 
+        assert isinstance(data_dictionary, dict)
+        data = data_dictionary["data"]
+        metadata = data_dictionary["metadata"]
+        assert isinstance(data, pd.core.frame.DataFrame)
+        assert isinstance(metadata, dict)
 
 
 if __name__ == "__main__":
