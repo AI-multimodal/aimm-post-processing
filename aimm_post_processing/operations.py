@@ -1,6 +1,7 @@
 """Module for housing post-processing operations."""
 
 from datetime import datetime
+from select import select
 from uuid import uuid4
 
 from monty.json import MSONable
@@ -8,7 +9,8 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import InterpolatedUnivariateSpline
 from sklearn.linear_model import LinearRegression
-
+from sklearn.metrics import mean_squared_error
+from aimm_post_processing import utils
 
 
 class Operator(MSONable):
@@ -117,7 +119,6 @@ class StandardizeGrid(Operator):
             for key, value in locals().items()
             if key not in ["self", "dfClient"]
         }
-
         data, metadata = self._preprocess_DataFrameClient(dfClient)
         metadata["post_processing"]["kwargs"] = kwargs
 
@@ -177,7 +178,7 @@ class RemoveBackground(Operator):
         
         Notes
         -----
-        `LinearRegression().fit()` takes 2-D arrays as in put. This can be explored
+        `LinearRegression().fit()` takes 2-D arrays as input. This can be explored
         for batch processing of multiple spectra
 
         """
@@ -186,7 +187,6 @@ class RemoveBackground(Operator):
             for key, value in locals().items()
             if key not in ["self", "dfClient"]
         }
-
         data, metadata = self._preprocess_DataFrameClient(dfClient)
         metadata["post_processing"]["kwargs"] = kwargs
 
@@ -203,3 +203,150 @@ class RemoveBackground(Operator):
             new_data[column] = data.loc[:,column].to_numpy() - background.flatten()
 
         return {"data": pd.DataFrame(new_data), "metadata": metadata}
+
+class StandardizeIntensity(Operator):
+    """ Scale the intensity so they vary in similar range.
+    """
+
+    def __call__(
+        self,
+        dfClient,
+        *,
+        x0 = None,
+        xf = None,
+        x_column='energy',
+        y_columns=['mu']
+    ):
+        """
+        Align the intensity to the mean of a selected range, and scale the intensity up to standard
+        deviation.
+
+        Parameters
+        ----------
+        dfClient : tiled.client.dataframe.DataFrameClient
+        x0 : float
+            The lower bound of energy range for which the mean is calculated. If None, the first 
+            point in the energy grid is used. Default is None.
+        yf : float
+            The upper bound of energy range for which the mean is calculated. If None, the last 
+            point in the energy grid is used. Default is None.
+        x_column : str, optional
+                References a single column in the DataFrameClient (this is the
+                "x-axis"). Default is "energy".
+        y_columns : list, optional
+            References a list of columns in the DataFrameClient (these are the
+            "y-axes"). Default is ["mu"].
+        
+        Returns
+        -------
+        dict
+            A dictionary of the data and metadata. The data is a :class:`pd.DataFrame`, 
+            and the metadata is itself a dictionary.
+
+        """
+        kwargs = {
+            key: value
+            for key, value in locals().items()
+            if key not in ["self", "dfClient"]
+        }
+        data, metadata = self._preprocess_DataFrameClient(dfClient)
+        metadata["post_processing"]["kwargs"] = kwargs
+
+        grid = data.loc[:, x_column]
+        if x0 is None: x0 = grid[0]
+        if xf is None: xf = grid[-1]
+        assert x0 < xf, "Invalid range, make sure x0 < xf"
+        select_mean_range = (grid > x0) & (grid < xf)
+        
+        new_data = {x_column: data[x_column]}
+        for column in y_columns:
+            mu = data.loc[:, column]
+            mu_mean = mu[select_mean_range].mean()
+            mu_std = mu.std()
+            new_data.update({column: (mu-mu_mean)/mu_std})
+        
+        return {"data": pd.DataFrame(new_data), "metadata": metadata}
+
+
+class Smooth(Operator):
+    """Return the simple moving average of spectra with a rolling window.
+    """
+    def __call__(
+        self,
+        dfClient,
+        *,
+        window = 10,
+        x_column='energy',
+        y_columns=['mu']
+    ):
+        """
+        Parameters
+        ----------
+        dfClient : tiled.client.dataframe.DataFrameClient
+        window : float, in eV.
+            The rolling window in eV over which the average intensity is taken.
+        x_column : str, optional
+                References a single column in the DataFrameClient (this is the
+                "x-axis"). Default is "energy".
+        y_columns : list, optional
+            References a list of columns in the DataFrameClient (these are the
+            "y-axes"). Default is ["mu"].
+        
+        Returns:
+        --------
+        dict
+            A dictionary of the data and metadata. The data is a :class:`pd.DataFrame`, 
+            and the metadata is itself a dictionary.
+        """
+        data, metadata = self._preprocess_DataFrameClient(dfClient)
+        metadata["post_processing"]["kwargs"] = {
+            key: value
+            for key, value in locals().items()
+            if key not in ["self", "dfClient"]
+        }
+        
+        grid = data.loc[:,x_column]
+        new_data = {x_column: data[x_column]}
+        metadata["post_processing"]["noise"] = {}
+        for column in y_columns:
+            y = data.loc[:, column]
+            y_smooth = utils.simple_moving_average(grid, y, window=window)
+            new_data.update({column: y_smooth})
+            mse = mean_squared_error(y, y_smooth)
+            n2s = mse / y_smooth.std()
+            metadata["post_processing"]["noise"][column] = {
+                "mse": mse, 
+                "n2s": n2s
+            }
+
+        return {"data": pd.DataFrame(new_data), "metadata": metadata}
+
+
+class Classify(Operator):
+    """ Label the spectrum as "good", "noisy" or "discard" based on the quality of the spectrum.
+    """
+    def __call__(
+        self, 
+        dfClient,
+        *,
+        classifier):
+        """
+        Parameters
+        ----------
+        dfClient : tiled.client.dataframe.DataFrameClient
+        classifier : Callable
+            The classifier that takes in the spectrum and output a label.
+
+        """
+
+        kwargs = {
+            key: value
+            for key, value in locals().items()
+            if key not in ["self", "dfClient"]
+        }
+        data, metadata = self._preprocess_DataFrameClient(dfClient)
+        metadata["post_processing"]["kwargs"] = kwargs
+
+        
+
+
