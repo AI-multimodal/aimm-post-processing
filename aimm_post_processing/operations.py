@@ -11,6 +11,7 @@ from scipy.interpolate import InterpolatedUnivariateSpline
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 from aimm_post_processing import utils
+from copy import copy
 
 
 class Operator(MSONable):
@@ -25,62 +26,128 @@ class Operator(MSONable):
         (node).
     """
 
+    def __init__( # Initialize common parameters for all operators
+        self,
+        x_column="energy",
+        y_columns=["mu"],
+    ):
+        self.x_column = x_column
+        self.y_columns = y_columns
+        self.operator_id = str(uuid4()) # UID for the defined operator.
+        self.kwargs = None
+
     def __call__(self):
         raise NotImplementedError
-
-    def _preprocess_DataFrameClient(self, x):
-        """Preliminary pre-processing of the DataFrameClient object. Takes the
-        :class:`tiled.client.dataframe.DataFrameClient` object as input and
-        returns the read data in addition to an augmented metadata dictionary.
+    
+    def _update_local_kwargs(self, local_kwargs):
+        """Collect all the variables in local space to be added to "post-processing" metadata.
+        local_kwargs are usually `locals().items()` where it is called, and it is position 
+        sensitive. 
+        This function must be called LAST in the constructor of child class.
         """
+        self.kwargs = {
+            key: value
+            for key, value in local_kwargs
+            if key not in ["self"]
+        } 
 
-        data = x.read()
-        metadata = dict(x.metadata)
+    def _preprocess_metadata(self, dataDict, local_kwargs):
+        """Preliminary pre-processing of the dictionary object that contains data and metadata. 
+        Takes the:class:`dict` object as input and returns the untouched data in addition to an 
+        augmented metadata dictionary.
+        
+        Parameters
+        ---------
+        dataDict : dict
+            The data dictionary that contains data and metadata
+        local_kwargs : tuple
+            A tuple (usually `locals().items()` where it is called) of local variables in operator
+        space.
+
+        Notes
+        -----
+        1. Measurement `id` is suspiciously `_id` that sits under `sample` in the metadata.
+        Need to check if this hierchy is universal for all data.
+        """
+        assert not (local_kwargs is None), "Must call '_update_local_kwargs' method first!"
+
+        # meka a copy, otherwise python will make modification to input dataDict instead.
+        data = copy(dataDict["data"]) 
+        metadata = copy(dataDict["metadata"])
+        
+        # parents are the uid of the last processed data, or the original sample id otherwise.
+        try: 
+            parents_id = metadata["post_processing"]["uid"]
+        except: 
+            parents_id = metadata['sample']['_id']
+
         dt = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        metadata["uid"] = str(uuid4())
         metadata["post_processing"] = {
             "operator": self.as_dict(),
-            "kwargs": dict(),
-            "parents": [x.uri],
+            "kwargs": local_kwargs,
             "datetime": f"{dt} UTC",
+            "operation_id": str(uuid4()),
+            "parents": parents_id
         }
 
         return data, metadata
 
-
 class Identity(Operator):
     """The identity operation. Does nothing. Used for testing purposes."""
 
-    def __call__(self, dfClient):
+    def __init__(self):
+        super(Identity, self).__init__()
+        self._update_local_kwargs(locals().items())
+
+    def __call__(self, dataDict):
         """
         Parameters
         ----------
-        dfClient : tiled.client.dataframe.DataFrameClient
+        dataDict : dict
+            A dictionary of the data and metadata. The data is a
+            :class:`pd.DataFrame`, and the metadata is itself a dictionary.
 
         Returns
         -------
-        dict
-            A dictionary of the data and metadata. The data is a
-            :class:`pd.DataFrame`, and the metadata is itself a dictionary.
+        dataDict : dict
+            Same as input
         """
 
-        data, metadata = self._preprocess_DataFrameClient(dfClient)
+        data, metadata = self._preprocess_metadata(dataDict, self.kwargs)
         return {"data": data, "metadata": metadata}
+
+class Pull(Operator):
+    def __init__(self):
+        self._update_local_kwargs(locals().items())
+    
+    def _preprocess_metadata(self, dfClient, local_kwargs):
+        """Override the original pre-processing with 
+        :class:`tiled.client.dataframe.DataFrameClient` object.
+        """
+        return super()._preprocess_metadata(
+            {"data": dfClient.read(), "metadata": dict(dfClient.metadata)},
+            local_kwargs
+        )
+
+    def __call__(self, dfClient):
+        """ This operator does nothing but return the data/metadata dictionary for a given 
+        `tiled.client.dataframe.DataFrameClient`.
+        """
+        data, metadata = self._preprocess_metadata(dfClient, self.kwargs)
+        return {"data": pd.DataFrame(data), "metadata": metadata}
 
 
 class StandardizeGrid(Operator):
     """Interpolates specified columns onto a common grid."""
 
-    def __call__(
+    def __init__(
         self,
-        dfClient,
-        *,
         x0,
         xf,
         nx,
         interpolated_univariate_spline_kwargs=dict(),
         x_column="energy",
-        y_columns=["mu"],
+        y_columns=["mu"]
     ):
         """Interpolates the provided DataFrameClient onto a grid as specified
         by the provided parameters.
@@ -106,29 +173,34 @@ class StandardizeGrid(Operator):
         y_columns : list, optional
             References a list of columns in the DataFrameClient (these are the
             "y-axes"). Default is ["mu"].
-
-        Returns
+        
+        Returns:
         -------
-        dict
-            A dictionary of the data and metadata. The data is a
-            :class:`pd.DataFrame`, and the metadata is itself a dictionary.
+        An instance of StandardGrid operator.
         """
+        super(StandardizeGrid, self).__init__(x_column, y_columns)
+        self.x0 = x0
+        self.xf = xf
+        self.nx = nx
+        self.interpolated_univariate_spline_kwargs = interpolated_univariate_spline_kwargs
+        self._update_local_kwargs(locals().items())
 
-        kwargs = {
-            key: value
-            for key, value in locals().items()
-            if key not in ["self", "dfClient"]
-        }
-        data, metadata = self._preprocess_DataFrameClient(dfClient)
-        metadata["post_processing"]["kwargs"] = kwargs
+    def __call__(self, dataDict):
 
-        new_grid = np.linspace(x0, xf, nx)
-        new_data = {x_column: new_grid}
-        for column in y_columns:
+        """Takes in a dictionary of the data amd metadata. The data is a
+        :class:`pd.DataFrame`, and the metadata is itself a dictionary.
+        Returns the same dictionary with processed data and metadata.
+        """
+        
+        data, metadata = self._preprocess_metadata(dataDict, self.kwargs)
+
+        new_grid = np.linspace(self.x0, self.xf, self.nx)
+        new_data = {self.x_column: new_grid}
+        for column in self.y_columns:
             ius = InterpolatedUnivariateSpline(
-                data[x_column],
+                data[self.x_column],
                 data[column],
-                **interpolated_univariate_spline_kwargs,
+                **self.interpolated_univariate_spline_kwargs,
             )
             new_data[column] = ius(new_grid)
 
@@ -138,18 +210,16 @@ class StandardizeGrid(Operator):
 class RemoveBackground(Operator):
     """Fit the pre-edge region to a victoreen function and subtract it from the spectrum.
     """
-    def __call__(
+    def __init__(
         self,
-        dfClient,
         *,
         x0,
-        xf, 
+        xf,
         x_column="energy",
         y_columns=["mu"],
-        victoreen_order = 0
+        victoreen_order=0
     ):
         """Subtract background from data.
-
         Fit the pre-edge data to a line with slope, and subtract slope info from data.
 
         Parameters
@@ -169,56 +239,58 @@ class RemoveBackground(Operator):
             The order of Victoreen function. The selected data is fitted to Victoreen pre-edge 
             function (in which one fits a line to μ(E)*E^n for some value of n. Default is 0,
             which is a linear fit.
-
+        
         Returns
         -------
-        dict
-            A dictionary of the data and metadata. The data is a
-            :class:`pd.DataFrame`, and the metadata is itself a dictionary.
+        An instance of RemoveBackground operator
+        """
+        super(RemoveBackground, self).__init__(x_column, y_columns)
+        self.x0 = x0
+        self.xf = xf
+        self.victoreen_order = victoreen_order
+        self._update_local_kwargs(locals().items())
+
+    def __call__(self, dataDict):
+        """
+        Takes in a dictionary of the data amd metadata. The data is a
+        :class:`pd.DataFrame`, and the metadata is itself a dictionary.
+        Returns the same dictionary with processed data and metadata.
         
         Notes
         -----
         `LinearRegression().fit()` takes 2-D arrays as input. This can be explored
         for batch processing of multiple spectra
-
         """
-        kwargs = {
-            key: value
-            for key, value in locals().items()
-            if key not in ["self", "dfClient"]
-        }
-        data, metadata = self._preprocess_DataFrameClient(dfClient)
-        metadata["post_processing"]["kwargs"] = kwargs
 
-        bg_data = data.loc[(data[x_column] >= x0) * (data[x_column] < xf)]
+        data, metadata = self._preprocess_metadata(dataDict, self.kwargs)
 
-        new_data = {x_column: data[x_column]}
-        for column in y_columns:
-            y = bg_data[column] * bg_data[x_column]**victoreen_order
+        bg_data = data.loc[(data[self.x_column] >= self.x0) * (data[self.x_column] < self.xf)]
+
+        new_data = {self.x_column: data[self.x_column]}
+        for column in self.y_columns:
+            y = bg_data[column] * bg_data[self.x_column]**self.victoreen_order
             reg = LinearRegression().fit(
-                bg_data[x_column].to_numpy().reshape(-1,1), 
+                bg_data[self.x_column].to_numpy().reshape(-1,1), 
                 y.to_numpy().reshape(-1,1)
             )
-            background = reg.predict(data[x_column].to_numpy().reshape(-1,1))
+            background = reg.predict(data[self.x_column].to_numpy().reshape(-1,1))
             new_data[column] = data.loc[:,column].to_numpy() - background.flatten()
 
         return {"data": pd.DataFrame(new_data), "metadata": metadata}
 
+
 class StandardizeIntensity(Operator):
     """ Scale the intensity so they vary in similar range.
     """
-
-    def __call__(
+    def __init__(
         self,
-        dfClient,
         *,
         x0 = None,
         xf = None,
-        x_column='energy',
-        y_columns=['mu']
+        x_column="energy",
+        y_columns=["mu"]
     ):
-        """
-        Align the intensity to the mean of a selected range, and scale the intensity up to standard
+        """Align the intensity to the mean of a selected range, and scale the intensity up to standard
         deviation.
 
         Parameters
@@ -239,27 +311,30 @@ class StandardizeIntensity(Operator):
         
         Returns
         -------
-        dict
-            A dictionary of the data and metadata. The data is a :class:`pd.DataFrame`, 
-            and the metadata is itself a dictionary.
+        An instance of StandardizeIntensity operator
+        """
+        super(StandardizeIntensity, self).__init__(x_column, y_columns)
+        self.x0 = x0
+        self.xf = xf
+        self._update_local_kwargs(locals().items())
+
+    def __call__(self, dataDict):
+        """
+        Takes in a dictionary of the data amd metadata. The data is a
+        :class:`pd.DataFrame`, and the metadata is itself a dictionary.
+        Returns the same dictionary with processed data and metadata.
 
         """
-        kwargs = {
-            key: value
-            for key, value in locals().items()
-            if key not in ["self", "dfClient"]
-        }
-        data, metadata = self._preprocess_DataFrameClient(dfClient)
-        metadata["post_processing"]["kwargs"] = kwargs
+        data, metadata = self._preprocess_metadata(dataDict, self.kwargs)
 
-        grid = data.loc[:, x_column]
+        grid = data.loc[:, self.x_column]
         if x0 is None: x0 = grid[0]
         if xf is None: xf = grid[-1]
         assert x0 < xf, "Invalid range, make sure x0 < xf"
         select_mean_range = (grid > x0) & (grid < xf)
         
-        new_data = {x_column: data[x_column]}
-        for column in y_columns:
+        new_data = {self.x_column: data[self.x_column]}
+        for column in self.y_columns:
             mu = data.loc[:, column]
             mu_mean = mu[select_mean_range].mean()
             mu_std = mu.std()
@@ -271,6 +346,14 @@ class StandardizeIntensity(Operator):
 class Smooth(Operator):
     """Return the simple moving average of spectra with a rolling window.
     """
+    def __init__(
+        self,
+        *,
+        window=10,
+        x_column='energy',
+        y_columns=['mu']
+    ):
+        super(Smooth, self).__init__(x_column, y_columns)
     def __call__(
         self,
         dfClient,
