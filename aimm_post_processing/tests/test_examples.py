@@ -28,12 +28,15 @@ class TestOperator:
     def test_Pull_from_dfClient(self):    
         assert isinstance(self.data_dict["data"], pd.DataFrame)
         assert isinstance(self.data_dict["metadata"], dict)
+        assert list(self.data_dict["metadata"]["post_processing"].keys()) == [1]
 
     def test_Identity_adds_parent_uid(self):
         identity_operator = Identity()
         data_dict1 = identity_operator(self.data_dict)
-        assert data_dict1["metadata"]["post_processing"]["parents"] == \
-            self.data_dict["metadata"]["post_processing"]["uid"]
+        pp = data_dict1["metadata"]["post_processing"]
+        assert list(pp.keys()) == [1, 2]
+        assert pp[2]["parent_id"] == \
+            self.data_dict["metadata"]["post_processing"][1]["id"]
         
     def test_StandardizeGrid_works(self):
         standardizegrid_operator = StandardizeGrid(
@@ -46,17 +49,17 @@ class TestOperator:
         data_dict1 = standardizegrid_operator(self.data_dict)
 
         data = data_dict1["data"]
-        metadata = data_dict1["metadata"]
+        pp = data_dict1["metadata"]["post_processing"]
         assert isinstance(data, pd.core.frame.DataFrame)
-        assert isinstance(metadata, dict)
-
+        assert list(pp.keys()) == [1, 2]
+        
         assert data.columns.to_list() == ['energy', 'mutrans', 'mufluor', 'murefer']
         assert len(data) == 1301
-        assert metadata["post_processing"]["kwargs"]["x0"] == 15700
-        assert metadata["post_processing"]["kwargs"]["xf"] == 17000
-        assert metadata["post_processing"]["kwargs"]["nx"] == 1301
-        assert metadata["post_processing"]["parents"] == \
-            self.data_dict["metadata"]["post_processing"]["uid"]
+        assert pp[2]["kwargs"]["x0"] == 15700
+        assert pp[2]["kwargs"]["xf"] == 17000
+        assert pp[2]["kwargs"]["nx"] == 1301
+        assert pp[2]["parent_id"] == \
+            self.data_dict["metadata"]["post_processing"][1]["id"]
 
     def test_RemoveBackground_works(self):
         
@@ -70,44 +73,11 @@ class TestOperator:
         data_dict1 = removebackground_operator(self.data_dict)
     
         data = data_dict1["data"]
-        metadata = data_dict1["metadata"]
+        pp = data_dict1["metadata"]["post_processing"]
         assert isinstance(data, pd.core.frame.DataFrame)
-        assert metadata["post_processing"]["parents"] == \
-            self.data_dict["metadata"]["post_processing"]["uid"]
-
-    def test_Operator_Chains(self):
-        pull_operator = Pull()
-        identity_operator = Identity()
-        standardizegrid_operator = StandardizeGrid(
-            x0=15700, 
-            xf=17000, 
-            nx=1301,
-            x_column="energy",
-            y_columns=["mutrans", "mufluor", "murefer"]
-        )
-        removebackground_operator = RemoveBackground(
-            x0=15700, 
-            xf=15800, 
-            x_column="energy",
-            y_columns=["mutrans", "mufluor", "murefer"],
-            victoreen_order=0
-        )
-        data_dict = pull_operator(self.view)
-        data_dict0 = identity_operator(data_dict)
-        data_dict1 = identity_operator(data_dict0)
-        data_dict2 = standardizegrid_operator(data_dict1)
-        data_dict3 = removebackground_operator(data_dict2)
-
-        assert data_dict["metadata"]["post_processing"]["parents"] == \
-            self.view.metadata['sample']['_id']
-        assert data_dict0["metadata"]["post_processing"]["parents"] == \
-            data_dict["metadata"]["post_processing"]["uid"]
-        assert data_dict1["metadata"]["post_processing"]["parents"] == \
-            data_dict0["metadata"]["post_processing"]["uid"]
-        assert data_dict2["metadata"]["post_processing"]["parents"] == \
-            data_dict1["metadata"]["post_processing"]["uid"]
-        assert data_dict3["metadata"]["post_processing"]["parents"] == \
-            data_dict2["metadata"]["post_processing"]["uid"]
+        assert list(pp.keys()) == [1, 2]
+        assert pp[2]["parent_id"] == \
+            self.data_dict["metadata"]["post_processing"][1]["id"]
 
     def test_pipeline_works(self):
         pull = Pull()
@@ -136,25 +106,27 @@ class TestOperator:
         for operator in pipeline:
             data_dict = operator(data_dict)
 
+        pp = data_dict["metadata"]["post_processing"]
+        assert list(pp.keys()) == [1,2,3,4]
 
-    def test_Smooth_works(self):
+    # def test_Smooth_works(self):
         
-        smooth_operator = RemoveBackground()
-        data_dictionary = smooth_operator(
-            self.view, 
-            x0=15700, 
-            xf=15800, 
-            x_column="energy",
-            y_columns=["mutrans", "mufluor", "murefer"],
-            victoreen_order=0
-        )
+    #     smooth_operator = RemoveBackground()
+    #     data_dictionary = smooth_operator(
+    #         self.view, 
+    #         x0=15700, 
+    #         xf=15800, 
+    #         x_column="energy",
+    #         y_columns=["mutrans", "mufluor", "murefer"],
+    #         victoreen_order=0
+    #     )
 
-        assert isinstance(data_dictionary, dict)
-        data = data_dictionary["data"]
-        metadata = data_dictionary["metadata"]
-        assert isinstance(data, pd.core.frame.DataFrame)
-        assert isinstance(metadata, dict)
+    #     assert isinstance(data_dictionary, dict)
+    #     data = data_dictionary["data"]
+    #     metadata = data_dictionary["metadata"]
+    #     assert isinstance(data, pd.core.frame.DataFrame)
+    #     assert isinstance(metadata, dict)
     
 
 if __name__ == "__main__":
-    TestOperator().test_Operator_Chains()
+    TestOperator().test_pipeline_works()

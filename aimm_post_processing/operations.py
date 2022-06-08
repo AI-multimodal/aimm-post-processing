@@ -11,7 +11,7 @@ from scipy.interpolate import InterpolatedUnivariateSpline
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 from aimm_post_processing import utils
-from copy import copy
+from copy import deepcopy
 
 
 class Operator(MSONable):
@@ -72,23 +72,34 @@ class Operator(MSONable):
         assert not (local_kwargs is None), "Must call '_update_local_kwargs' method first!"
 
         # meka a copy, otherwise python will make modification to input dataDict instead.
-        data = copy(dataDict["data"]) 
-        metadata = copy(dataDict["metadata"])
+        data = deepcopy(dataDict["data"]) 
+        metadata = deepcopy(dataDict["metadata"])
         
-        # parents are the uid of the last processed data, or the original sample id otherwise.
+        # Retrive the info of the last operation.
         try: 
-            parents_id = metadata["post_processing"]["uid"]
-        except: 
-            parents_id = metadata['sample']['_id']
-
+            post_processing = metadata["post_processing"]
+            last_step = np.max(list(post_processing.keys()))
+            last_id = post_processing[last_step]["id"]
+        except KeyError:
+            post_processing = {}
+            last_step = 0 # Data is not processed yet.
+            last_id = metadata['sample']['_id']
+        
+        # Add new operation metadata to history
         dt = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        metadata["post_processing"] = {
-            "operator": self.as_dict(),
-            "kwargs": local_kwargs,
-            "datetime": f"{dt} UTC",
-            "operation_id": str(uuid4()),
-            "parents": parents_id
-        }
+        post_processing.update(
+            {
+                last_step+1: {
+                    "operator": self.as_dict(),
+                    "id": str(uuid4()),
+                    "parent_id": last_id,
+                    "datetime": f"{dt} UTC",
+                    "kwargs": local_kwargs
+                }
+            }
+        )
+
+        metadata["post_processing"] = post_processing
 
         return data, metadata
 
