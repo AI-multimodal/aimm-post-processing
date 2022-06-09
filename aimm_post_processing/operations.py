@@ -71,35 +71,24 @@ class Operator(MSONable):
         """
         assert not (local_kwargs is None), "Must call '_update_local_kwargs' method first!"
 
-        # meka a copy, otherwise python will make modification to input dataDict instead.
+         # meka a copy, otherwise python will make modification to input dataDict instead.
         data = deepcopy(dataDict["data"]) 
         metadata = deepcopy(dataDict["metadata"])
         
-        # Retrive the info of the last operation.
+        # parents are the uid of the last processed data, or the original sample id otherwise.
         try: 
-            post_processing = metadata["post_processing"]
-            last_step = np.max(list(post_processing.keys()))
-            last_id = post_processing[last_step]["id"]
-        except KeyError:
-            post_processing = {}
-            last_step = 0 # Data is not processed yet.
-            last_id = metadata['sample']['_id']
-        
-        # Add new operation metadata to history
-        dt = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        post_processing.update(
-            {
-                last_step+1: {
-                    "operator": self.as_dict(),
-                    "id": str(uuid4()),
-                    "parent_id": last_id,
-                    "datetime": f"{dt} UTC",
-                    "kwargs": local_kwargs
-                }
-            }
-        )
+            parent_id = metadata["post_processing"]["id"]
+        except: 
+            parent_id = metadata['sample']['_id']
 
-        metadata["post_processing"] = post_processing
+        dt = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        metadata["post_processing"] = {
+            "id": str(uuid4()),
+            "parent": parent_id,
+            "operator": self.as_dict(),
+            # "kwargs": local_kwargs, # (self.as_dict() contains all info)
+            "datetime": f"{dt} UTC",
+        }
 
         return data, metadata
 
