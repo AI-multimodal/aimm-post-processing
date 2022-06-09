@@ -86,7 +86,7 @@ class Operator(MSONable):
             "id": str(uuid4()),
             "parent": parent_id,
             "operator": self.as_dict(),
-            # "kwargs": local_kwargs, # (self.as_dict() contains all info)
+            "kwargs": local_kwargs, # (self.as_dict() contains all info)
             "datetime": f"{dt} UTC",
         }
 
