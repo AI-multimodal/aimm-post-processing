@@ -13,12 +13,6 @@ from sklearn.metrics import mean_squared_error
 from aimm_post_processing import utils
 from copy import deepcopy
 
-import larch
-from larch.xafs import pre_edge, autobk, mback, xftf
-from larch import Group as xafsgroup
-from larch import Interpreter
-from isstools.xasproject.xasproject import XASDataSet
-
 
 class Operator(MSONable):
     """Base operator class. Tracks everything required through a combination
