@@ -13,6 +13,12 @@ from sklearn.metrics import mean_squared_error
 from aimm_post_processing import utils
 from copy import deepcopy
 
+import larch
+from larch.xafs import pre_edge, autobk, mback, xftf
+from larch import Group as xafsgroup
+from larch import Interpreter
+from isstools.xasproject.xasproject import XASDataSet
+
 
 class Operator(MSONable):
     """Base operator class. Tracks everything required through a combination
@@ -279,6 +285,24 @@ class RemoveBackground(Operator):
         return {"data": pd.DataFrame(new_data), "metadata": metadata}
 
 
+class Normalize(Operator):
+    """
+    """
+    def __init__(
+        self,
+        x_column="energy",
+        y_columns=["mu"]
+    ):
+        super(Normalize, self).__init__(x_column, y_columns)
+        self._update_local_kwargs(locals().items())
+
+    def __call__(self, dataDict):
+        data, metadata = self._preprocess_metadata(dataDict, self.kwargs)
+        xas_ds = XASDataSet(name="Shift XANES", energy=grid, mu=dd) 
+        xas_ds.norm1 = norm1 # update atribute for force_normalization
+        xas_ds.normalize_force() # force the normalization again with updated atribute        
+
+
 class StandardizeIntensity(Operator):
     """ Scale the intensity so they vary in similar range.
     """
@@ -328,10 +352,10 @@ class StandardizeIntensity(Operator):
         data, metadata = self._preprocess_metadata(dataDict, self.kwargs)
 
         grid = data.loc[:, self.x_column]
-        if x0 is None: x0 = grid[0]
-        if xf is None: xf = grid[-1]
-        assert x0 < xf, "Invalid range, make sure x0 < xf"
-        select_mean_range = (grid > x0) & (grid < xf)
+        if self.x0 is None: self.x0 = grid[0]
+        if self.xf is None: self.xf = grid[-1]
+        assert self.x0 < self.xf, "Invalid range, make sure x0 < xf"
+        select_mean_range = (grid > self.x0) & (grid < self.xf)
         
         new_data = {self.x_column: data[self.x_column]}
         for column in self.y_columns:
@@ -430,6 +454,5 @@ class Classify(Operator):
         data, metadata = self._preprocess_DataFrameClient(dfClient)
         metadata["post_processing"]["kwargs"] = kwargs
 
-        
 
 
