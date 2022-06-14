@@ -106,4 +106,4 @@ class TestOperator:
 
 
 if __name__ == "__main__":
-    TestOperator().test_pipeline_works()
+    TestOperator().test_StandardizeGrid_works()
