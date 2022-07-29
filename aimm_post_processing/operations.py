@@ -67,7 +67,7 @@ class Operator(MSONable, ABC):
         try: 
             parent_id = metadata["post_processing"]["id"]
         except: 
-            parent_id = metadata['sample']['_id']
+            parent_id = metadata['sample']['uid']
 
         dt = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         metadata["post_processing"] = {
@@ -261,20 +261,20 @@ class RemoveBackground(Operator):
         return pd.DataFrame(new_data)
 
 
-class Normalize(Operator):
-    """
-    """
-    def __init__(
-        self,
-        x_column="energy",
-        y_columns=["mu"]
-    ):
-        super().__init__(x_column, y_columns)
+# class Normalize(Operator):
+#     """
+#     """
+#     def __init__(
+#         self,
+#         x_column="energy",
+#         y_columns=["mu"]
+#     ):
+#         super().__init__(x_column, y_columns)
 
-    def _process_data(self, df):
-        xas_ds = XASDataSet(name="Shift XANES", energy=grid, mu=dd) 
-        xas_ds.norm1 = norm1 # update atribute for force_normalization
-        xas_ds.normalize_force() # force the normalization again with updated atribute        
+#     def _process_data(self, df):
+#         xas_ds = XASDataSet(name="Shift XANES", energy=grid, mu=dd) 
+#         xas_ds.norm1 = norm1 # update atribute for force_normalization
+#         xas_ds.normalize_force() # force the normalization again with updated atribute        
 
 
 class StandardizeIntensity(Operator):
