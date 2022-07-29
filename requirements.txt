@@ -1,1 +1,3 @@
 monty
+sklearn
+sphinx_rtd_theme
