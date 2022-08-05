@@ -38,10 +38,11 @@ class Operator(MSONable, ABC):
 
     def __call__(self, dataDict):
         # meke a copy, otherwise python will make modification to input dataDict instead.
-        metadata = deepcopy(dataDict["metadata"])
-        new_metadata = self._process_metadata(metadata)
-        df = deepcopy(dataDict["data"])
-        new_df = self._process_data(df)
+        copy_dataDict = deepcopy(dataDict)
+
+        new_metadata = self._process_metadata(copy_dataDict["metadata"])
+        new_df = self._process_data(copy_dataDict["data"])
+
         return {"data": new_df, "metadata": new_metadata}
 
     def _process_metadata(self, metadata):
@@ -67,7 +68,7 @@ class Operator(MSONable, ABC):
         try: 
             parent_id = metadata["post_processing"]["id"]
         except: 
-            parent_id = metadata['sample']['uid']
+            parent_id = metadata['_tiled']['uid']
 
         dt = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         metadata["post_processing"] = {
@@ -99,6 +100,7 @@ class Pull(Operator):
         new_metadata = self._process_metadata(metadata)
         df = deepcopy(dfClient.read())
         new_df = self._process_data(df)
+
         return {"data": new_df, "metadata": new_metadata}
 
     def _process_data(self, df):
@@ -408,3 +410,6 @@ class Classify(Operator):
 
 
 
+class PreNormalize(Operator):
+    """
+    """
