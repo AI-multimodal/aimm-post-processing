@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import InterpolatedUnivariateSpline
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error
+
+# from sklearn.metrics import mean_squared_error
 
 
 from aimm_post_processing import utils
@@ -37,7 +38,7 @@ class Operator(MSONable, ABC):
 
     @abstractmethod
     def __call__(self, client):
-        ...        
+        ...
 
 
 class UnaryOperator(Operator):
@@ -48,11 +49,11 @@ class UnaryOperator(Operator):
         """Processing of the metadata dictionary object. Takes the
         :class:`dict` object as input and returns a modified
         dictionary with the following changes:
-        
+
             1. metadata["_tiled"]["uid"] is replaced with a new uuid string.
             2. metadata["post_processing"] is created with keys that indicate
                the current state of the class, the parent ids
-        
+
         Parameters
         ----------
         metadata : dict
@@ -72,7 +73,7 @@ class UnaryOperator(Operator):
                 "operator": self.as_dict(),
                 "kwargs": self.__dict__,
                 "datetime": f"{dt} UTC",
-            }
+            },
         }
 
     def __call__(self, df_client):
@@ -83,7 +84,7 @@ class UnaryOperator(Operator):
             )
         return {
             "data": self._process_data(df_client.read()),
-            "metadata": self._process_metadata(df_client.metadata)
+            "metadata": self._process_metadata(df_client.metadata),
         }
 
 
@@ -110,7 +111,29 @@ class Identity(UnaryOperator):
 
 
 class StandardizeGrid(UnaryOperator):
-    """Interpolates specified columns onto a common grid."""
+    """Interpolates specified columns onto a common grid.
+
+    Parameters
+    ----------
+    x0 : float
+        The lower bound of the grid to interpolate onto.
+    xf : float
+        The upper bound of the grid to interpolate onto.
+    nx : int
+        The number of interpolation points.
+    interpolated_univariate_spline_kwargs : dict, optional
+        Keyword arguments to be passed to the
+        :class:`InterpolatedUnivariateSpline`. See
+        [here](https://docs.scipy.org/doc/scipy/reference/generated/
+        scipy.interpolate.InterpolatedUnivariateSpline.html) for the
+        documentation on this class.
+    x_column : str, optional
+        References a single column in the DataFrameClient (this is the
+        "x-axis").
+    y_columns : list, optional
+        References a list of columns in the DataFrameClient (these are the
+        "y-axes").
+    """
 
     def __init__(
         self,
@@ -120,42 +143,18 @@ class StandardizeGrid(UnaryOperator):
         nx,
         interpolated_univariate_spline_kwargs=dict(),
         x_column="energy",
-        y_columns=["mu"]
+        y_columns=["mu"],
     ):
-        """Interpolates the provided DataFrameClient onto a grid as specified
-        by the provided parameters.
-
-        Parameters
-        ----------
-        x0 : float
-            The lower bound of the grid to interpolate onto.
-        xf : float
-            The upper bound of the grid to interpolate onto.
-        nx : int
-            The number of interpolation points.
-        interpolated_univariate_spline_kwargs : dict, optional
-            Keyword arguments to be passed to the
-            :class:`InterpolatedUnivariateSpline`. See
-            [here](https://docs.scipy.org/doc/scipy/reference/generated/
-            scipy.interpolate.InterpolatedUnivariateSpline.html) for the
-            documentation on this class.
-        x_column : str, optional
-            References a single column in the DataFrameClient (this is the
-            "x-axis").
-        y_columns : list, optional
-            References a list of columns in the DataFrameClient (these are the
-            "y-axes").
-        """
-
-        self.x_column = x_column
-        self.y_columns = y_columns
         self.x0 = x0
         self.xf = xf
         self.nx = nx
-        self.interpolated_univariate_spline_kwargs = interpolated_univariate_spline_kwargs
-        
-    def _process_data(self, df):
+        self.interpolated_univariate_spline_kwargs = (
+            interpolated_univariate_spline_kwargs
+        )
+        self.x_column = x_column
+        self.y_columns = y_columns
 
+    def _process_data(self, df):
         """Takes in a dictionary of the data amd metadata. The data is a
         :class:`pd.DataFrame`, and the metadata is itself a dictionary.
         Returns the same dictionary with processed data and metadata.
@@ -175,100 +174,69 @@ class StandardizeGrid(UnaryOperator):
 
 
 class RemoveBackground(Operator):
-    """Fit the pre-edge region to a victoreen function and subtract it from the spectrum.
-    """
-    def __init__(
-        self,
-        *,
-        x0,
-        xf,
-        x_column="energy",
-        y_columns=["mu"],
-        victoreen_order=0
-    ):
-        """Subtract background from data.
-        Fit the pre-edge data to a line with slope, and subtract slope info from data.
+    """Fit the pre-edge region to a Victoreen function and subtract it from the spectrum.
 
-        Parameters
-        ----------
-        dfClient : tiled.client.dataframe.DataFrameClient
-        x0 : float
-            The lower bound of energy range on which the background is fitted.
-        xf : flaot
-            The upper bound of energy range on which the background is fitted.
-        x_column : str, optional
-            References a single column in the DataFrameClient (this is the
-            "x-axis"). Default is "energy".
-        y_columns : list, optional
-            References a list of columns in the DataFrameClient (these are the
-            "y-axes"). Default is ["mu"].
-        victoreen_order : int
-            The order of Victoreen function. The selected data is fitted to Victoreen pre-edge 
-            function (in which one fits a line to μ(E)*E^n for some value of n. Default is 0,
-            which is a linear fit.
-        
-        Returns
-        -------
-        An instance of RemoveBackground operator
-        """
-        super().__init__(x_column, y_columns)
+    Parameters
+    ----------
+    x0 : float
+        The lower bound of energy range on which the background is fitted.
+    xf : float
+        The upper bound of energy range on which the background is fitted.
+    x_column : str, optional
+        References a single column in the DataFrameClient (this is the
+        "x-axis").
+    y_columns : list, optional
+        References a list of columns in the DataFrameClient (these are the
+        "y-axes").
+    victoreen_order : int
+        The order of Victoreen function. The selected data is fitted to
+        Victoreen pre-edge  function (in which one fits a line to μ(E)*E^n for
+        some value of n.
+    """
+
+    def __init__(
+        self, *, x0, xf, x_column="energy", y_columns=["mu"], victoreen_order=0
+    ):
         self.x0 = x0
         self.xf = xf
         self.victoreen_order = victoreen_order
+        self.x_column = x_column
+        self.y_columns = y_columns
 
     def _process_data(self, df):
         """
-        Takes in a dictionary of the data amd metadata. The data is a
-        :class:`pd.DataFrame`, and the metadata is itself a dictionary.
-        Returns the same dictionary with processed data and metadata.
-        
         Notes
         -----
-        `LinearRegression().fit()` takes 2-D arrays as input. This can be explored
-        for batch processing of multiple spectra
+        `LinearRegression().fit()` takes 2-D arrays as input. This can be
+        explored for batch processing of multiple spectra
         """
 
-        bg_data = df.loc[(df[self.x_column] >= self.x0) * (df[self.x_column] < self.xf)]
+        bg_data = df.loc[
+            (df[self.x_column] >= self.x0) * (df[self.x_column] < self.xf)
+        ]
 
         new_data = {self.x_column: df[self.x_column]}
         for column in self.y_columns:
-            y = bg_data[column] * bg_data[self.x_column]**self.victoreen_order
+            y = bg_data[column] * bg_data[self.x_column] ** self.victoreen_order
             reg = LinearRegression().fit(
-                bg_data[self.x_column].to_numpy().reshape(-1,1), 
-                y.to_numpy().reshape(-1,1)
+                bg_data[self.x_column].to_numpy().reshape(-1, 1),
+                y.to_numpy().reshape(-1, 1),
             )
-            background = reg.predict(df[self.x_column].to_numpy().reshape(-1,1))
-            new_data[column] = df.loc[:,column].to_numpy() - background.flatten()
+            background = reg.predict(
+                df[self.x_column].to_numpy().reshape(-1, 1)
+            )
+            new_data[column] = (
+                df.loc[:, column].to_numpy() - background.flatten()
+            )
 
         return pd.DataFrame(new_data)
 
 
-# class Normalize(Operator):
-#     """
-#     """
-#     def __init__(
-#         self,
-#         x_column="energy",
-#         y_columns=["mu"]
-#     ):
-#         super().__init__(x_column, y_columns)
-
-#     def _process_data(self, df):
-#         xas_ds = XASDataSet(name="Shift XANES", energy=grid, mu=dd) 
-#         xas_ds.norm1 = norm1 # update atribute for force_normalization
-#         xas_ds.normalize_force() # force the normalization again with updated atribute        
-
-
 class StandardizeIntensity(Operator):
-    """ Scale the intensity so they vary in similar range.
-    """
+    """Scale the intensity so they vary in similar range."""
+
     def __init__(
-        self,
-        *,
-        x0 = None,
-        xf = None,
-        x_column="energy",
-        y_columns=["mu"]
+        self, *, x0=None, xf=None, x_column="energy", y_columns=["mu"]
     ):
         """Align the intensity to the mean of a selected range, and scale the intensity up to standard
         deviation.
@@ -277,10 +245,10 @@ class StandardizeIntensity(Operator):
         ----------
         dfClient : tiled.client.dataframe.DataFrameClient
         x0 : float
-            The lower bound of energy range for which the mean is calculated. If None, the first 
+            The lower bound of energy range for which the mean is calculated. If None, the first
             point in the energy grid is used. Default is None.
         yf : float
-            The upper bound of energy range for which the mean is calculated. If None, the last 
+            The upper bound of energy range for which the mean is calculated. If None, the last
             point in the energy grid is used. Default is None.
         x_column : str, optional
                 References a single column in the DataFrameClient (this is the
@@ -288,7 +256,7 @@ class StandardizeIntensity(Operator):
         y_columns : list, optional
             References a list of columns in the DataFrameClient (these are the
             "y-axes"). Default is ["mu"].
-        
+
         Returns
         -------
         An instance of StandardizeIntensity operator
@@ -306,42 +274,39 @@ class StandardizeIntensity(Operator):
         """
 
         grid = df.loc[:, self.x_column]
-        if self.x0 is None: self.x0 = grid[0]
-        if self.xf is None: self.xf = grid[-1]
+        if self.x0 is None:
+            self.x0 = grid[0]
+        if self.xf is None:
+            self.xf = grid[-1]
         assert self.x0 < self.xf, "Invalid range, make sure x0 < xf"
         select_mean_range = (grid > self.x0) & (grid < self.xf)
-        
+
         new_data = {self.x_column: df[self.x_column]}
         for column in self.y_columns:
             mu = df.loc[:, column]
             mu_mean = mu[select_mean_range].mean()
             mu_std = mu.std()
-            new_data.update({column: (mu-mu_mean)/mu_std})
-        
+            new_data.update({column: (mu - mu_mean) / mu_std})
+
         return pd.DataFrame(new_data)
 
 
 class Smooth(Operator):
     """Return the simple moving average of spectra with a rolling window.
-        Parameters
-        ----------
-        
-        window : float, in eV.
-            The rolling window in eV over which the average intensity is taken.
-        x_column : str, optional
-                References a single column in the DataFrameClient (this is the
-                "x-axis"). Default is "energy".
-        y_columns : list, optional
-            References a list of columns in the DataFrameClient (these are the
-            "y-axes"). Default is ["mu"].
+    Parameters
+    ----------
+
+    window : float, in eV.
+        The rolling window in eV over which the average intensity is taken.
+    x_column : str, optional
+            References a single column in the DataFrameClient (this is the
+            "x-axis"). Default is "energy".
+    y_columns : list, optional
+        References a list of columns in the DataFrameClient (these are the
+        "y-axes"). Default is ["mu"].
     """
-    def __init__(
-        self,
-        *,
-        window=10,
-        x_column='energy',
-        y_columns=['mu']
-    ):
+
+    def __init__(self, *, window=10, x_column="energy", y_columns=["mu"]):
         super().__init__(x_column, y_columns)
         self.window = window
 
@@ -350,29 +315,29 @@ class Smooth(Operator):
         Takes in a dictionary of the data amd metadata. The data is a
         :class:`pd.DataFrame`, and the metadata is itself a dictionary.
         Returns the same dictionary with processed data and metadata.
-        
+
         Returns:
         --------
         dict
-            A dictionary of the data and metadata. The data is a :class:`pd.DataFrame`, 
+            A dictionary of the data and metadata. The data is a :class:`pd.DataFrame`,
             and the metadata is itself a dictionary.
         """
-        
-        grid = df.loc[:,self.x_column]
+
+        grid = df.loc[:, self.x_column]
         new_data = {self.x_column: df[self.x_column]}
         for column in self.y_columns:
             y = df.loc[:, column]
             y_smooth = utils.simple_moving_average(grid, y, window=self.window)
             new_data.update({column: y_smooth})
-            mse = mean_squared_error(y, y_smooth)
-            n2s = mse / y_smooth.std()
+            # mse = mean_squared_error(y, y_smooth)
+            # n2s = mse / y_smooth.std()
 
         return pd.DataFrame(new_data)
 
 
 class Classify(Operator):
-    """ Label the spectrum as "good", "noisy" or "discard" based on the quality of the spectrum.
-    """
+    """Label the spectrum as "good", "noisy" or "discard" based on the quality of the spectrum."""
+
     def __init__(self, classifier):
         super().__init__()
         self.classifier = classifier
@@ -389,7 +354,5 @@ class Classify(Operator):
         return df
 
 
-
 class PreNormalize(Operator):
-    """
-    """
+    """ """
