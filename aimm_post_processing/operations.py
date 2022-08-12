@@ -12,6 +12,7 @@ from sklearn.linear_model import LinearRegression
 
 from aimm_post_processing import utils
 from tiled.client.dataframe import DataFrameClient
+from tiled.client.node import Node
 
 
 class Operator(MSONable, ABC):
@@ -40,7 +41,16 @@ class Operator(MSONable, ABC):
 
 class UnaryOperator(Operator):
     """Specialized operator class which takes only a single input. This input
-    must be of instance :class:`DataFrameClient`."""
+    must be of instance :class:`DataFrameClient`.
+
+    Particularly, the operator object's ``__call__`` method can be executed on
+    either a :class:`DataFrameClient` or :class:`Node` object. If run on the
+    :class:`DataFrameClient`, the operator call will return a single dictionary
+    with the keys "data" and "metadata", as one would expect. If the input is
+    of type :class:`Node`, then an attempt is made to iterate through all
+    children of that node, executing the operator on each instance
+    individually. A list of dictionaries is then returned.
+    """
 
     def _process_metadata(self, metadata):
         """Processing of the metadata dictionary object. Takes the
@@ -73,16 +83,34 @@ class UnaryOperator(Operator):
             },
         }
 
-    def __call__(self, df_client):
-        if not isinstance(df_client, DataFrameClient):
+    def _call_on_client(self, client):
+        return {
+            "data": self._process_data(client.read()),
+            "metadata": self._process_metadata(client.metadata),
+        }
+
+    def __call__(self, client):
+        if isinstance(client, DataFrameClient):
+            return self._call_on_client(client)
+
+        elif isinstance(client, Node):
+            # Apply the operator to each of the instances in the node
+            values = [value for value in client.values()]
+            if not all([isinstance(v, DataFrameClient) for v in values]):
+                raise RuntimeError(
+                    "Provided client when iterated on has produced entries "
+                    "that are not DataFrameClient objects. This is likely "
+                    "due to passing a query such as "
+                    'df_client = c["edge"]["K"], when a query like '
+                    'df_client = c["edge"]["K"]["uid"] is required'
+                )
+            return list(map(self._call_on_client, values))
+
+        else:
             raise ValueError(
-                f"df_client is of type {type(df_client)} but should be of "
+                f"client is of type {type(client)} but should be of "
                 "type DataFrameClient"
             )
-        return {
-            "data": self._process_data(df_client.read()),
-            "metadata": self._process_metadata(df_client.metadata),
-        }
 
 
 class Identity(UnaryOperator):
