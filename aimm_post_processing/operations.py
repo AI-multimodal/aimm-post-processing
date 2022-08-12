@@ -1,6 +1,6 @@
 """Module for housing post-processing operations."""
 
-from abc import ABC
+from abc import ABC, abstractmethod
 from datetime import datetime
 from uuid import uuid4
 
@@ -10,9 +10,11 @@ import pandas as pd
 from scipy.interpolate import InterpolatedUnivariateSpline
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
+
+
 from aimm_post_processing import utils
-from copy import deepcopy
-from abc import ABC, abstractmethod
+from tiled.client.dataframe import DataFrameClient
+
 
 class Operator(MSONable, ABC):
     """Base operator class. Tracks everything required through a combination
@@ -22,93 +24,72 @@ class Operator(MSONable, ABC):
     .. important::
 
         The __call__ method must be derived for every operator. In particular,
-        this operator should take as arguments at least one other data point
-        (node).
+        this operator should take as arguments at least one data point (node).
     """
 
-    def __init__( # Initialize common parameters for all operators
-        self,
-        x_column="energy",
-        y_columns=["mu"],
-    ):
-        self.x_column = x_column
-        self.y_columns = y_columns
-        self.operator_id = str(uuid4()) # UID for the defined operator.
+    @abstractmethod
+    def _process_data(self):
+        ...
+
+    @abstractmethod
+    def _process_metadata(self):
+        ...
+
+    @abstractmethod
+    def __call__(self, client):
+        ...        
 
 
-    def __call__(self, dataDict):
-        # meke a copy, otherwise python will make modification to input dataDict instead.
-        copy_dataDict = deepcopy(dataDict)
-
-        new_metadata = self._process_metadata(copy_dataDict["metadata"])
-        new_df = self._process_data(copy_dataDict["data"])
-
-        return {"data": new_df, "metadata": new_metadata}
+class UnaryOperator(Operator):
+    """Specialized operator class which takes only a single input. This input
+    must be of instance :class:`DataFrameClient`."""
 
     def _process_metadata(self, metadata):
-        """Preliminary pre-processing of the dictionary object that contains data and metadata. 
-        Takes the:class:`dict` object as input and returns the untouched data in addition to an 
-        augmented metadata dictionary.
+        """Processing of the metadata dictionary object. Takes the
+        :class:`dict` object as input and returns a modified
+        dictionary with the following changes:
+        
+            1. metadata["_tiled"]["uid"] is replaced with a new uuid string.
+            2. metadata["post_processing"] is created with keys that indicate
+               the current state of the class, the parent ids
         
         Parameters
-        ---------
-        dataDict : dict
-            The data dictionary that contains data and metadata
-        local_kwargs : tuple
-            A tuple (usually `locals().items()` where it is called) of local variables in operator
-        space.
+        ----------
+        metadata : dict
+            The metadata dictionary accessed via ``df_client.metadata``.
 
-        Notes
-        -----
-        1. Measurement `id` is suspiciously `_id` that sits under `sample` in the metadata.
-        Need to check if this hierchy is universal for all data.
+        Returns
+        -------
+        dict
+            The new metadata object for the post-processed child.
         """
-
-        # parents are the uid of the last processed data, or the original sample id otherwise.
-        try: 
-            parent_id = metadata["post_processing"]["id"]
-        except: 
-            parent_id = metadata['_tiled']['uid']
 
         dt = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        metadata["post_processing"] = {
-            "id": str(uuid4()),
-            "parent": parent_id,
-            "operator": self.as_dict(),
-            "kwargs": self.__dict__,
-            "datetime": f"{dt} UTC",
+        return {
+            "_tiled": {"uid": str(uuid4())},  # Assign a new uid
+            "post_processing": {
+                "parents": [metadata["_tiled"]["uid"]],
+                "operator": self.as_dict(),
+                "kwargs": self.__dict__,
+                "datetime": f"{dt} UTC",
+            }
         }
 
-        return metadata
-    
-    @abstractmethod
-    def _process_data(self, df) -> dict:
-        """User must override this method.
-        """
-        raise NotImplementedError
+    def __call__(self, df_client):
+        if not isinstance(df_client, DataFrameClient):
+            raise ValueError(
+                f"df_client is of type {type(df_client)} but should be of "
+                "type DataFrameClient"
+            )
+        return {
+            "data": self._process_data(df_client.read()),
+            "metadata": self._process_metadata(df_client.metadata)
+        }
 
 
-class Pull(Operator):
-    def __init__(self):
-        super().__init__()
-
-    def __call__(self, dfClient):
-        """ This operator does nothing but return the data/metadata dictionary for a given 
-        `tiled.client.dataframe.DataFrameClient`.
-        """
-        metadata = deepcopy(dict(dfClient.metadata))
-        new_metadata = self._process_metadata(metadata)
-        df = deepcopy(dfClient.read())
-        new_df = self._process_data(df)
-
-        return {"data": new_df, "metadata": new_metadata}
-
-    def _process_data(self, df):
-        return df
-
-
-class Identity(Operator):
-    """The identity operation. Does nothing. Used for testing purposes."""
+class Identity(UnaryOperator):
+    """The identity operation. Does nothing. Primarily used for testing
+    purposes."""
 
     def __init__(self):
         super().__init__()
@@ -117,22 +98,23 @@ class Identity(Operator):
         """
         Parameters
         ----------
-        dataDict : pandas.DataFrame
-            The data is a :class:`pd.DataFrame`
+        df : pandas.DataFrame
+            The dataframe object to process.
 
         Returns
         -------
-        dataDict : dict
-            Same as input
+        pandas.DataFrame
         """
+
         return df
 
 
-class StandardizeGrid(Operator):
+class StandardizeGrid(UnaryOperator):
     """Interpolates specified columns onto a common grid."""
 
     def __init__(
         self,
+        *,
         x0,
         xf,
         nx,
@@ -151,24 +133,22 @@ class StandardizeGrid(Operator):
             The upper bound of the grid to interpolate onto.
         nx : int
             The number of interpolation points.
-        interpolated_univariate_spline_kwargs : TYPE, optional
+        interpolated_univariate_spline_kwargs : dict, optional
             Keyword arguments to be passed to the
-            :class:`InterpolatedUnivariateSpline` class. See
+            :class:`InterpolatedUnivariateSpline`. See
             [here](https://docs.scipy.org/doc/scipy/reference/generated/
             scipy.interpolate.InterpolatedUnivariateSpline.html) for the
-            documentation on this class. Default is {}.
+            documentation on this class.
         x_column : str, optional
             References a single column in the DataFrameClient (this is the
-            "x-axis"). Default is "energy".
+            "x-axis").
         y_columns : list, optional
             References a list of columns in the DataFrameClient (these are the
-            "y-axes"). Default is ["mu"].
-        
-        Returns:
-        -------
-        An instance of StandardGrid operator.
+            "y-axes").
         """
-        super().__init__(x_column, y_columns)
+
+        self.x_column = x_column
+        self.y_columns = y_columns
         self.x0 = x0
         self.xf = xf
         self.nx = nx
