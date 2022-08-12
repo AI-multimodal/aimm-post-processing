@@ -10,9 +10,6 @@ import pandas as pd
 from scipy.interpolate import InterpolatedUnivariateSpline
 from sklearn.linear_model import LinearRegression
 
-# from sklearn.metrics import mean_squared_error
-
-
 from aimm_post_processing import utils
 from tiled.client.dataframe import DataFrameClient
 
@@ -173,8 +170,9 @@ class StandardizeGrid(UnaryOperator):
         return pd.DataFrame(new_data)
 
 
-class RemoveBackground(Operator):
-    """Fit the pre-edge region to a Victoreen function and subtract it from the spectrum.
+class RemoveBackground(UnaryOperator):
+    """Fit the pre-edge region to a Victoreen function and subtract it from the
+    spectrum.
 
     Parameters
     ----------
@@ -190,8 +188,8 @@ class RemoveBackground(Operator):
         "y-axes").
     victoreen_order : int
         The order of Victoreen function. The selected data is fitted to
-        Victoreen pre-edge  function (in which one fits a line to μ(E)*E^n for
-        some value of n.
+        Victoreen pre-edge  function (in which one fits a line to
+        :math:`E^n \\mu(E)` for some value of :math:`n`.
     """
 
     def __init__(
@@ -207,7 +205,7 @@ class RemoveBackground(Operator):
         """
         Notes
         -----
-        `LinearRegression().fit()` takes 2-D arrays as input. This can be
+        ``LinearRegression().fit()`` takes 2-D arrays as input. This can be
         explored for batch processing of multiple spectra
         """
 
@@ -232,38 +230,32 @@ class RemoveBackground(Operator):
         return pd.DataFrame(new_data)
 
 
-class StandardizeIntensity(Operator):
-    """Scale the intensity so they vary in similar range."""
+class StandardizeIntensity(UnaryOperator):
+    """Scale the intensity so they vary in similar range. Specifically, aligns
+    the intensity to the mean of a selected range, and scale the intensity up
+    to standard deviation.
 
-    def __init__(
-        self, *, x0=None, xf=None, x_column="energy", y_columns=["mu"]
-    ):
-        """Align the intensity to the mean of a selected range, and scale the intensity up to standard
-        deviation.
+    Parameters
+    ----------
+    x0 : float
+        The lower bound of energy range for which the mean is calculated. If None, the first
+        point in the energy grid is used. Default is None.
+    yf : float
+        The upper bound of energy range for which the mean is calculated. If None, the last
+        point in the energy grid is used. Default is None.
+    x_column : str, optional
+            References a single column in the DataFrameClient (this is the
+            "x-axis"). Default is "energy".
+    y_columns : list, optional
+        References a list of columns in the DataFrameClient (these are the
+        "y-axes"). Default is ["mu"].
+    """
 
-        Parameters
-        ----------
-        dfClient : tiled.client.dataframe.DataFrameClient
-        x0 : float
-            The lower bound of energy range for which the mean is calculated. If None, the first
-            point in the energy grid is used. Default is None.
-        yf : float
-            The upper bound of energy range for which the mean is calculated. If None, the last
-            point in the energy grid is used. Default is None.
-        x_column : str, optional
-                References a single column in the DataFrameClient (this is the
-                "x-axis"). Default is "energy".
-        y_columns : list, optional
-            References a list of columns in the DataFrameClient (these are the
-            "y-axes"). Default is ["mu"].
-
-        Returns
-        -------
-        An instance of StandardizeIntensity operator
-        """
-        super().__init__(x_column, y_columns)
+    def __init__(self, *, x0, xf, x_column="energy", y_columns=["mu"]):
         self.x0 = x0
         self.xf = xf
+        self.x_column = x_column
+        self.y_columns = y_columns
 
     def _process_data(self, df):
         """
@@ -291,26 +283,27 @@ class StandardizeIntensity(Operator):
         return pd.DataFrame(new_data)
 
 
-class Smooth(Operator):
+class Smooth(UnaryOperator):
     """Return the simple moving average of spectra with a rolling window.
+
     Parameters
     ----------
-
     window : float, in eV.
         The rolling window in eV over which the average intensity is taken.
     x_column : str, optional
-            References a single column in the DataFrameClient (this is the
-            "x-axis"). Default is "energy".
+        References a single column in the DataFrameClient (this is the
+        "x-axis").
     y_columns : list, optional
         References a list of columns in the DataFrameClient (these are the
-        "y-axes"). Default is ["mu"].
+        "y-axes").
     """
 
-    def __init__(self, *, window=10, x_column="energy", y_columns=["mu"]):
-        super().__init__(x_column, y_columns)
+    def __init__(self, *, window=10.0, x_column="energy", y_columns=["mu"]):
         self.window = window
+        self.x_column = x_column
+        self.y_columns = y_columns
 
-    def _apply(self, df):
+    def _process_data(self, df):
         """
         Takes in a dictionary of the data amd metadata. The data is a
         :class:`pd.DataFrame`, and the metadata is itself a dictionary.
@@ -329,30 +322,18 @@ class Smooth(Operator):
             y = df.loc[:, column]
             y_smooth = utils.simple_moving_average(grid, y, window=self.window)
             new_data.update({column: y_smooth})
-            # mse = mean_squared_error(y, y_smooth)
-            # n2s = mse / y_smooth.std()
 
         return pd.DataFrame(new_data)
 
 
-class Classify(Operator):
-    """Label the spectrum as "good", "noisy" or "discard" based on the quality of the spectrum."""
+# TODO
+class Classify(UnaryOperator):
+    """Label the spectrum as "good", "noisy" or "discard" based on the quality
+    of the spectrum."""
 
-    def __init__(self, classifier):
-        super().__init__()
-        self.classifier = classifier
-
-    def _process_data(self, df):
-        """
-        Parameters
-        ----------
-        dfClient : tiled.client.dataframe.DataFrameClient
-        classifier : Callable
-            The classifier that takes in the spectrum and output a label.
-
-        """
-        return df
+    ...
 
 
-class PreNormalize(Operator):
-    """ """
+# TODO
+class PreNormalize(UnaryOperator):
+    ...
